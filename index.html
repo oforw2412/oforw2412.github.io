@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>烏法魯攻略分析機</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 React 和 Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.263.1"
+      }
+    }
+    </script>
+    
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        /* 針對手機優化觸控區域 */
+        button { touch-action: manipulation; }
+    </style>
+</head>
+<body class="bg-slate-50 text-gray-800">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { Shield, Sword, X, Zap, RefreshCw, Info, Crown, Skull, Target, ThumbsUp, AlertTriangle, CheckCircle, Plus, Users, ArrowRight } from 'lucide-react';
+
+        // 特殊屬性列表 (互斥)
+        const SPECIAL_TYPES_IDS = ['light', 'dark', 'gold', 'rainbow', 'cloud'];
+
+        // 自定義屬性資料與顏色
+        const TYPES = [
+          { name: '木', id: 'wood', color: 'bg-green-600 text-white' },
+          { name: '土', id: 'earth', color: 'bg-yellow-800 text-white' },
+          { name: '火', id: 'fire', color: 'bg-red-500 text-white' },
+          { name: '冰', id: 'ice', color: 'bg-cyan-400 text-gray-900' },
+          { name: '雷', id: 'thunder', color: 'bg-yellow-400 text-gray-900' },
+          { name: '水', id: 'water', color: 'bg-blue-500 text-white' },
+          { name: '風', id: 'wind', color: 'bg-purple-600 text-white' },
+          { name: '魔', id: 'magic', color: 'bg-pink-500 text-white' },
+          { name: '糖', id: 'candy', color: 'bg-pink-200 text-gray-900' },
+          { name: '鋼', id: 'steel', color: 'bg-gray-400 text-gray-900 border border-gray-500' },
+          { name: '光明', id: 'light', color: 'bg-yellow-100 text-yellow-800 border border-yellow-300' },
+          { name: '黑暗', id: 'dark', color: 'bg-gray-900 text-gray-100' },
+          { name: '黃金', id: 'gold', color: 'bg-yellow-500 text-white' },
+          { 
+            name: '彩虹', 
+            id: 'rainbow', 
+            color: 'text-white shadow-sm border border-white/20', 
+            style: { background: 'linear-gradient(90deg, #ef4444, #f97316, #eab308, #22c55e, #3b82f6, #8b5cf6, #ec4899)' } 
+          },
+          { name: '雲朵', id: 'cloud', color: 'bg-slate-200 text-slate-700' },
+        ];
+
+        // 自定義相剋表 (Attacker -> Defender)
+        const TYPE_CHART = {
+          wood:    { wood: 0, earth: 2, water: 2, candy: 2, fire: 0.5, ice: 0.5, steel: 0.5 },
+          earth:   { earth: 0, thunder: 2, candy: 2, steel: 2, wood: 0.5, wind: 0.5, magic: 0.5 },
+          water:   { water: 0, fire: 2, magic: 2, steel: 2, wood: 0.5, wind: 0.5, thunder: 0.5 },
+          fire:    { fire: 0, wood: 2, ice: 2, wind: 2, water: 0.5, magic: 0.5, candy: 0.5 },
+          ice:     { ice: 0, wood: 2, thunder: 2, magic: 2, fire: 0.5, candy: 0.5, steel: 0.5 },
+          thunder: { thunder: 0, water: 2, candy: 2, steel: 2, ice: 0.5, wind: 0.5, earth: 0.5 },
+          wind:    { wind: 0, earth: 2, thunder: 2, water: 2, fire: 0.5, magic: 0.5, steel: 0.5 },
+          magic:   { magic: 0, earth: 2, fire: 2, wind: 2, water: 0.5, ice: 0.5, candy: 0.5 },
+          candy:   { candy: 0, fire: 2, ice: 2, magic: 2, wood: 0.5, earth: 0.5, thunder: 0.5 },
+          steel:   { steel: 0, wood: 2, ice: 2, wind: 2, water: 0.5, earth: 0.5, thunder: 0.5 },
+          
+          light:   { light: 0, dark: 2, cloud: 2, gold: 0.5, rainbow: 0.5 },
+          dark:    { dark: 0, gold: 2, rainbow: 2, light: 0.5, cloud: 0.5 },
+          gold:    { gold: 0, light: 2, cloud: 2, dark: 0.5, rainbow: 0.5 },
+          cloud:   { cloud: 0, dark: 2, rainbow: 2, light: 0.5, gold: 0.5 },
+          rainbow: { rainbow: 0, light: 2, gold: 2, dark: 0.5, cloud: 0.5 }
+        };
+
+        const getSingleEffectiveness = (atkId, defId) => {
+          if (!atkId || !defId) return 1;
+          const interactions = TYPE_CHART[atkId];
+          if (!interactions) return 1;
+          return interactions[defId] !== undefined ? interactions[defId] : 1;
+        };
+
+        // 推薦系統
+        const getRecommendations = (enemyTeam) => {
+          if (!enemyTeam || enemyTeam.length === 0) return { singles: [], combos: [] };
+          
+          const enemyMain = enemyTeam[0]; // 敵方主屬性 (防禦弱點 & 攻擊主力)
+          const singles = [];
+          const combos = [];
+          
+          // 只有這些屬性可以作為單兵推薦
+          const SPECIAL_TYPES = SPECIAL_TYPES_IDS;
+
+          // 1. 單屬性推薦 (Single) - 限制為特殊屬性
+          TYPES.forEach(type => {
+            // 如果不是特殊屬性，直接跳過單兵推薦
+            if (!SPECIAL_TYPES.includes(type.id)) return;
+
+            const dmg = getSingleEffectiveness(type.id, enemyMain);
+            // 必須 2 倍傷害才推薦
+            if (dmg >= 2) {
+              let maxTaken = 0;
+              let threateningAttr = null;
+              enemyTeam.forEach(enemyAttr => {
+                const taken = getSingleEffectiveness(enemyAttr, type.id);
+                if (taken > maxTaken) {
+                  maxTaken = taken;
+                  threateningAttr = enemyAttr;
+                }
+              });
+              singles.push({
+                type: type,
+                damageDeal: dmg,
+                maxDamageTaken: maxTaken,
+                threat: threateningAttr,
+                riskLevel: maxTaken >= 2 ? 'high' : maxTaken === 0 ? 'immune' : 'safe'
+              });
+            }
+          });
+          // 單兵排序：受傷低的排前面
+          singles.sort((a, b) => a.maxDamageTaken - b.maxDamageTaken);
+
+          // 2. 組合推薦 (Combo) - 主屬扛傷(Tank)，副屬輸出(DPS)
+          TYPES.forEach(tank => {
+            // Tank 必須能防禦敵方的主屬性 (0x 或 0.5x)
+            const tankDefMult = getSingleEffectiveness(enemyMain, tank.id);
+            
+            if (tankDefMult <= 0.5) {
+              // 找到合適的 Tank，接著找能造成 2x 傷害的副手
+              TYPES.forEach(attacker => {
+                const atkMult = getSingleEffectiveness(attacker.id, enemyMain);
+                
+                if (atkMult >= 2) {
+                  if (tank.id === attacker.id) return; // 排除同屬性
+
+                  // 檢查特殊屬性互斥規則
+                  const isTankSpecial = SPECIAL_TYPES.includes(tank.id);
+                  const isAtkSpecial = SPECIAL_TYPES.includes(attacker.id);
+                  if (isTankSpecial && isAtkSpecial) return;
+
+                  // 分析 Tank 在面對敵方【整隊】時的風險
+                  let maxTaken = 0;
+                  let threat = null;
+                  enemyTeam.forEach(e => {
+                     const taken = getSingleEffectiveness(e, tank.id);
+                     if (taken > maxTaken) {
+                       maxTaken = taken;
+                       threat = e;
+                     }
+                  });
+
+                  combos.push({
+                    tank,
+                    attacker,
+                    tankDefMult, // 對主屬防禦力
+                    maxDamageTaken: maxTaken, // 對全隊最大受傷
+                    threat
+                  });
+                }
+              });
+            }
+          });
+          
+          // 組合排序邏輯更新：
+          combos.sort((a, b) => {
+            // 1. 風險優先：有風險提示的 (maxDamageTaken >= 2) 排最後
+            const aRisk = a.maxDamageTaken >= 2 ? 1 : 0;
+            const bRisk = b.maxDamageTaken >= 2 ? 1 : 0;
+            if (aRisk !== bRisk) return aRisk - bRisk; // 0 (安全) 在前，1 (危險) 在後
+
+            // 2. 抵抗優先：在同風險等級下，抵抗 (0.5x) 優於 免疫 (0x)
+            // tankDefMult 0.5 (抵抗) vs 0 (免疫)
+            if (a.tankDefMult !== b.tankDefMult) {
+                // 我們希望 0.5 排在 0 前面
+                // b - a = 0 - 0.5 = -0.5 (a前)
+                // b - a = 0.5 - 0 = 0.5 (b前)
+                return b.tankDefMult - a.tankDefMult; 
+            }
+
+            // 3. 最後依據受傷程度排序 (越低越好)
+            return a.maxDamageTaken - b.maxDamageTaken;
+          });
+
+          return { singles, combos };
+        };
+
+        const TypeButton = ({ type, isSelected, onClick, disabled, isMain }) => (
+          <button
+            onClick={() => onClick(type.id)}
+            disabled={disabled && !isSelected}
+            style={type.style}
+            className={`
+              relative overflow-visible rounded-xl py-3 px-2 text-lg font-bold shadow-sm transition-all duration-200
+              ${type.color}
+              ${isSelected ? 'ring-4 ring-offset-2 ring-gray-500 scale-95 z-10 shadow-inner brightness-110' : ''}
+              ${disabled && !isSelected ? 'opacity-20 cursor-not-allowed grayscale' : 'opacity-100 hover:scale-105'}
+            `}
+          >
+            {isMain && (
+              <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-yellow-400 text-yellow-900 text-sm font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1 border border-yellow-200 z-20 whitespace-nowrap">
+                <Crown size={14} fill="currentColor" /> 主屬
+              </div>
+            )}
+            {type.name}
+          </button>
+        );
+
+        function App() {
+          const [enemyTeam, setEnemyTeam] = useState([]);
+          const [recommendations, setRecommendations] = useState({ singles: [], combos: [] });
+          const [activeTab, setActiveTab] = useState('combo');
+
+          const toggleType = (id) => {
+            const isSpecial = SPECIAL_TYPES_IDS.includes(id);
+            const hasSpecial = enemyTeam.some(t => SPECIAL_TYPES_IDS.includes(t));
+
+            if (enemyTeam.includes(id)) {
+              setEnemyTeam(enemyTeam.filter(t => t !== id));
+            } else {
+              if (isSpecial && hasSpecial) return;
+              if (enemyTeam.length < 3) setEnemyTeam([...enemyTeam, id]);
+            }
+          };
+
+          useEffect(() => {
+            if (enemyTeam.length > 0) {
+              const recs = getRecommendations(enemyTeam);
+              setRecommendations(recs);
+              
+              const enemyMain = enemyTeam[0];
+              const isSpecialEnemy = SPECIAL_TYPES_IDS.includes(enemyMain);
+              
+              if (isSpecialEnemy) {
+                setActiveTab('single');
+              } else {
+                setActiveTab('combo');
+              }
+              
+            } else {
+              setRecommendations({ singles: [], combos: [] });
+            }
+          }, [enemyTeam]);
+
+          const reset = () => {
+            setEnemyTeam([]);
+          };
+
+          const renderBadge = (id, size = 'sm') => {
+            if (!id) return null;
+            const t = TYPES.find(type => type.id === id);
+            
+            let sizeClasses = 'px-3 py-1 text-base';
+            if (size === 'lg') sizeClasses = 'px-5 py-2 text-xl';
+            else if (size === 'md') sizeClasses = 'px-4 py-1.5 text-lg';
+            
+            return (
+              <span 
+                style={t.style} 
+                className={`${t.color} ${sizeClasses} rounded-full font-bold shadow-sm inline-flex items-center gap-1`}
+              >
+                {t.name}
+              </span>
+            );
+          };
+
+          const isButtonDisabled = (type) => {
+            if (enemyTeam.length >= 3 && !enemyTeam.includes(type.id)) return true;
+            const isSpecial = SPECIAL_TYPES_IDS.includes(type.id);
+            const hasSpecial = enemyTeam.some(t => SPECIAL_TYPES_IDS.includes(t));
+            if (isSpecial && hasSpecial && !enemyTeam.includes(type.id)) return true;
+            return false;
+          };
+
+          return (
+            <div className="min-h-screen bg-slate-50 text-gray-800 font-sans pb-20">
+              
+              {/* Header */}
+              <header className="bg-white shadow-sm sticky top-0 z-50">
+                <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="bg-gradient-to-tr from-indigo-500 to-purple-500 text-white p-2 rounded-lg">
+                      <Target size={24} fill="currentColor" />
+                    </div>
+                    <h1 className="text-2xl font-extrabold tracking-tight text-gray-900">烏法魯攻略分析</h1>
+                  </div>
+                  <button 
+                    onClick={reset}
+                    className="flex items-center gap-1 text-base font-bold text-gray-500 hover:text-blue-600 transition-colors bg-gray-100 hover:bg-blue-50 px-4 py-2 rounded-full"
+                  >
+                    <RefreshCw size={18} /> 重置
+                  </button>
+                </div>
+              </header>
+
+              <main className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+
+                {/* 1. Set Enemy Team */}
+                <section className="bg-white p-6 rounded-2xl shadow-md border border-gray-100 relative overflow-hidden">
+                   <div className="absolute top-0 left-0 w-full h-2 bg-red-500"></div>
+                   <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-bold flex items-center gap-2 text-gray-800">
+                         <span className="bg-red-100 text-red-600 p-2 rounded-md"><Skull size={24} /></span>
+                         設定對手屬性
+                      </h2>
+                      {enemyTeam.length > 0 && (
+                        <button onClick={() => setEnemyTeam([])} className="text-lg text-gray-400 hover:text-blue-500 flex items-center gap-1 font-bold">
+                          <X size={18} /> 清除
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="mb-6 min-h-[4rem] flex flex-wrap gap-3 p-4 bg-red-50 rounded-xl border-2 border-dashed border-red-200 justify-center items-center">
+                       {enemyTeam.length === 0 ? (
+                         <div className="text-center text-red-400 flex flex-col items-center">
+                           <span className="text-xl font-bold">請點擊下方選擇對手屬性</span>
+                           <span className="text-base mt-1">(第一位為【主屬性】，系統將分析其弱點)</span>
+                         </div>
+                       ) : (
+                         enemyTeam.map((id, index) => (
+                           <div key={id} className="relative group cursor-pointer transform hover:scale-105 transition-transform" onClick={() => toggleType(id)}>
+                              {index === 0 && <Crown size={20} className="absolute -top-6 left-1/2 -translate-x-1/2 text-yellow-500 drop-shadow-sm" fill="currentColor"/>}
+                             {renderBadge(id, 'lg')}
+                           </div>
+                         ))
+                       )}
+                    </div>
+
+                    <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-5 gap-3">
+                      {TYPES.map((type) => (
+                        <TypeButton 
+                          key={`enemy-${type.id}`} 
+                          type={type} 
+                          isSelected={enemyTeam.includes(type.id)}
+                          isMain={enemyTeam[0] === type.id}
+                          onClick={() => toggleType(type.id)}
+                          disabled={isButtonDisabled(type)}
+                        />
+                      ))}
+                    </div>
+                </section>
+
+                {/* 2. Recommendation Section (Results) */}
+                <div className={`transition-all duration-500 ease-in-out ${enemyTeam.length > 0 ? 'opacity-100 translate-y-0' : 'opacity-50 translate-y-4 grayscale'}`}>
+                   <section className="bg-white p-0 rounded-2xl shadow-lg border border-indigo-100 overflow-hidden min-h-[300px]">
+                      {/* Report Header */}
+                      <div className="p-5 bg-gradient-to-r from-indigo-50 to-blue-50 border-b border-indigo-100 flex flex-col sm:flex-row justify-between items-center gap-4">
+                         <h2 className="text-2xl font-bold flex items-center gap-2 text-indigo-900">
+                            <span className="bg-indigo-600 text-white p-2 rounded-md"><ThumbsUp size={24} /></span>
+                            戰術分析報告
+                         </h2>
+                         
+                         <div className="flex bg-white rounded-lg p-1.5 shadow-sm border border-indigo-100">
+                            <button 
+                              onClick={() => setActiveTab('combo')}
+                              className={`px-6 py-2 rounded-md text-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'combo' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-500 hover:text-indigo-600'}`}
+                            >
+                              <Users size={20} /> 組合
+                            </button>
+                            <button 
+                              onClick={() => setActiveTab('single')}
+                              className={`px-6 py-2 rounded-md text-lg font-bold transition-all flex items-center gap-2 ${activeTab === 'single' ? 'bg-indigo-600 text-white shadow-sm' : 'text-gray-500 hover:text-indigo-600'}`}
+                            >
+                              <Target size={20} /> 單兵
+                            </button>
+                         </div>
+                      </div>
+
+                      {/* Report Content */}
+                      <div className="p-5 bg-slate-50 min-h-[300px]">
+                          {enemyTeam.length === 0 ? (
+                            <div className="h-full flex flex-col items-center justify-center text-gray-400 py-10">
+                               <Target size={64} className="mb-4 opacity-20" />
+                               <p className="text-xl">請先設定對手屬性，系統將自動生成攻略。</p>
+                            </div>
+                          ) : activeTab === 'combo' ? (
+                            /* COMBO RECOMMENDATIONS */
+                            recommendations.combos.length === 0 ? (
+                              <div className="text-center py-10 text-gray-500">
+                                <p className="text-xl font-bold">找不到完美的組合戰術。</p>
+                                <p className="text-base mt-2">嘗試查看「單兵戰術」或更換對手屬性。</p>
+                              </div>
+                            ) : (
+                              <div className="grid md:grid-cols-2 gap-4">
+                                {recommendations.combos.map((rec, idx) => (
+                                   <div key={idx} className="bg-white border-2 border-gray-200 rounded-xl hover:shadow-xl hover:border-indigo-400 transition-all flex flex-col relative overflow-hidden group">
+                                      <div className="absolute top-0 left-0 w-2 h-full bg-indigo-500"></div>
+                                      
+                                      {/* Card Header: The Team */}
+                                      <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center gap-3">
+                                         {/* Tank Part */}
+                                         <div className="flex items-center gap-2">
+                                            {renderBadge(rec.tank.id, 'md')}
+                                         </div>
+                                         
+                                         <Plus size={20} className="text-gray-300"/>
+                                         
+                                         {/* Attacker Part */}
+                                         <div className="flex items-center gap-2">
+                                            {renderBadge(rec.attacker.id, 'md')}
+                                         </div>
+                                      </div>
+                                      
+                                      {/* Risk Warning Only */}
+                                      {rec.maxDamageTaken >= 2 && (
+                                        <div className="p-4">
+                                           <div className="bg-orange-50 border-l-4 border-orange-400 rounded-r-lg p-3 text-base text-orange-900 flex items-start gap-2">
+                                              <AlertTriangle size={24} className="shrink-0 mt-0.5 text-orange-600" />
+                                              <span>
+                                                <b>風險提示：</b> 主屬雖然能擋，但會被對手 {renderBadge(rec.threat)} 反剋。
+                                              </span>
+                                           </div>
+                                        </div>
+                                      )}
+                                   </div>
+                                ))}
+                              </div>
+                            )
+                          ) : (
+                            /* SINGLE RECOMMENDATIONS */
+                            recommendations.singles.length === 0 ? (
+                              <div className="text-center py-10 text-gray-500">
+                                <p className="text-xl font-bold">找不到完美的單兵剋星。</p>
+                                <p className="text-base mt-2">建議使用「組合戰術」來攻略。</p>
+                                <p className="text-sm mt-1 text-gray-400">（單兵推薦僅顯示：光、暗、金、彩、雲）</p>
+                              </div>
+                            ) : (
+                              <div className="grid md:grid-cols-2 gap-4">
+                                {recommendations.singles.map((rec, idx) => (
+                                   <div key={idx} className="bg-white border-2 border-gray-200 rounded-xl p-0 hover:shadow-xl hover:border-indigo-400 transition-all flex flex-col relative overflow-hidden">
+                                      <div className="absolute top-0 left-0 w-2 h-full bg-emerald-500"></div>
+                                      
+                                      <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center gap-3">
+                                         <div className="flex items-center">
+                                            <span className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-base font-bold mr-2 border border-emerald-200">★</span>
+                                            {renderBadge(rec.type.id, 'lg')}
+                                         </div>
+                                         <span className="text-lg font-bold text-gray-500 ml-auto">單兵精選</span>
+                                      </div>
+
+                                      <div className="p-4 space-y-4">
+                                         <div className="flex justify-between items-center text-xl">
+                                            <span className="text-gray-600 font-bold">
+                                               承受傷害:
+                                            </span>
+                                            <span className={`font-bold px-3 py-1 rounded flex items-center gap-1 ${
+                                               rec.riskLevel === 'immune' ? "bg-green-100 text-green-800" : 
+                                               rec.riskLevel === 'safe' ? "bg-blue-50 text-blue-800" : "bg-orange-50 text-orange-800"
+                                    }`}>
+                                               {rec.riskLevel === 'immune' ? "安全" : 
+                                                rec.riskLevel === 'safe' ? "安全" : 
+                                                "高風險"}
+                                            </span>
+                                         </div>
+
+                                         <div className="flex justify-between items-center text-xl">
+                                            <span className="text-gray-600 font-bold">
+                                               攻擊傷害:
+                                            </span>
+                                            <span className="font-bold bg-red-50 text-red-600 px-3 py-1 rounded">
+                                               效果絕佳
+                                            </span>
+                                         </div>
+
+                                         {rec.riskLevel === 'high' && (
+                                            <div className="text-base text-orange-800 bg-orange-100 px-3 py-2 rounded-lg font-bold flex items-center gap-2">
+                                               <AlertTriangle size={20}/> 小心對手 {renderBadge(rec.threat)} 的反擊
+                                            </div>
+                                         )}
+                                      </div>
+                                   </div>
+                                ))}
+                              </div>
+                            )
+                          )}
+                      </div>
+                   </section>
+                </div>
+
+              </main>
+            </div>
+          );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
